@@ -4,7 +4,7 @@
 /* your list data structure declarations */
 
 struct node {
-    char** tokens ;
+    char** tokens;
     struct node *next;
 };
 

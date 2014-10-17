@@ -22,6 +22,19 @@ void free_list(struct node **list);
 bool pop_list(struct node **list);
 bool mode_set(char **tokens, bool current_mode);
 
+
+/* return tokens of parsed paths */
+char** parse_path(FILE *input_file) {
+    char **rv = NULL;
+    char *content = malloc(1000 * sizeof(char));
+    if (fgets(content, 1000, input_file) != NULL) {
+        rv = tokenify(content);
+    }
+    free(content);
+    return rv;
+}
+
+
 /* Create list of array of tokens and ignore anything after # */
 char** tokenify(const char *s) {
     int len = strlen(s);
@@ -98,6 +111,7 @@ void error_print_tokens(char **tokens) {
     int i = 0;
     while (tokens[i] != NULL) { fprintf(stderr, "%s ", tokens[i++]); }
     fprintf(stderr, "\n");
+    fflush(stderr);
 }
 
 
@@ -181,6 +195,18 @@ bool mode_set(char **tokens, bool current_mode) {
 
 
 int main(int argc, char **argv) {
+    FILE *pathfile = NULL;
+    char** path_list = NULL;
+    struct stat statbuf;
+
+    if (stat("shell-config", &statbuf) == 0) {
+        pathfile = fopen("shell-config", "r");
+        if (pathfile != NULL) {
+            path_list = parse_path(pathfile);
+            fclose(pathfile);
+        }
+    }
+    
     bool parallel_mode = false;
     bool exit_flag = false;
     bool next_parallel_mode = false;
@@ -194,11 +220,15 @@ int main(int argc, char **argv) {
         strcpy(input, "");
 
         printf("lleh$ ");
-        fgets(input, 1024, stdin);
+        if (fgets(input, 1024, stdin) != NULL) {
+            int len = strlen(input);
+            input[len - 1] = '\0';
+            commandify(input, &list);
+        }
+        else {
+            exit_flag = true;
+        }
 
-        int len = strlen(input);
-        input[len - 1] = '\0';
-        commandify(input, &list);
         free(input);
 
         while (list != NULL) {
@@ -217,10 +247,37 @@ int main(int argc, char **argv) {
             else if (strcmp(list->tokens[0], "resume") == 0) {
             }*/
             else {
+                // we actually get to execute something
                 pid = fork();
                 if (pid == 0) {
+                    int commlen = strlen(list->tokens[0]) + 1;
+                    char *command = malloc(commlen * sizeof(char));
+                    strcpy(command, list->tokens[0]);
+                    int curr_path = 0;
+
+                    // match the path-file pair puzzle
+                    while (path_list != NULL &&
+                           path_list[curr_path] != NULL &&
+                           stat(command, &statbuf) != 0) {
+                        free(command);
+                        commlen = strlen(path_list[curr_path]) +
+                                  strlen(list->tokens[0]) + 2;
+                        command = malloc(commlen);
+                        strcpy(command, path_list[curr_path++]);
+                        strcat(command, "/");
+                        strcat(command, list->tokens[0]);
+                    }
+
+                    // if command exists, swap.
+                    if (stat(command, &statbuf) == 0) {
+                        free(list->tokens[0]);
+                        list->tokens[0] = command;
+                    }
+                    else { free(command); }
+
                     if (execv(list->tokens[0], list->tokens) < 0) {
                         error_print_tokens(list->tokens);
+                        free_tokens(path_list);
                         free_list(&list);
                         exit(0);
                     }
@@ -232,9 +289,12 @@ int main(int argc, char **argv) {
             }
         }
         while (wait(&status) != -1);
+
         if (exit_flag) {
+            free_tokens(path_list);
             exit(0);
         }
+    
         parallel_mode = next_parallel_mode;
     }
 
