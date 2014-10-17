@@ -341,12 +341,12 @@ int main(int argc, char **argv) {
             else if (strcmp(list->tokens[0], "pause") == 0) {
                 if (list->tokens[1] == NULL ||
                     list->tokens[2] != NULL) {
-                    fprintf(stderr, "Unrecognized pause argument");
+                    fprintf(stderr, "Unrecognized pause argument\n");
                 }
                 else {
                     int pid = strtol(list->tokens[1], NULL, 10);
                     if (pid == 0) {
-                        fprintf(stderr, "Unrecognized pause argument");
+                        fprintf(stderr, "Unrecognized pause argument\n");
                     }
                     else {
                         kill(pid, SIGSTOP);
@@ -358,12 +358,12 @@ int main(int argc, char **argv) {
             else if (strcmp(list->tokens[0], "resume") == 0) {
                 if (list->tokens[1] == NULL ||
                     list->tokens[2] != NULL) {
-                    fprintf(stderr, "Unrecognized pause argument");
+                    fprintf(stderr, "Unrecognized resume argument\n");
                 }
                 else {
                     int pid = strtol(list->tokens[1], NULL, 10);
                     if (pid == 0) {
-                        fprintf(stderr, "Unrecognized pause argument");
+                        fprintf(stderr, "Unrecognized resume argument\n");
                     }
                     else {
                         kill(pid, SIGCONT);
