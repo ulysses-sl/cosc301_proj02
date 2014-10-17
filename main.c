@@ -401,7 +401,10 @@ int main(int argc, char **argv) {
                     list->tokens[0] = command;
                     it_runs = true;
                 }
-                else { free(command); }
+                else {
+                    free(command);
+                    new_cursor = true;
+                }
 
                 // ...and fork, finally
                 pid = fork();
