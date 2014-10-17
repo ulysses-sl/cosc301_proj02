@@ -269,12 +269,14 @@ void process_running(int pid, bool state, struct process *plist) {
 
 int main(int argc, char **argv) {
     FILE *pathfile = NULL;
-    char** path_list = NULL;
+    char** path_list = malloc(sizeof(char*));
+    path_list[0] = NULL;
     struct stat statbuf;
 
     if (stat("shell-config", &statbuf) == 0) {
         pathfile = fopen("shell-config", "r");
         if (pathfile != NULL) {
+            free(path_list);
             path_list = parse_path(pathfile);
             fclose(pathfile);
         }
@@ -383,9 +385,7 @@ int main(int argc, char **argv) {
                 bool it_runs = false;
 
                 // match the path-file pair puzzle
-                while (path_list != NULL &&
-                       path_list[curr_path] != NULL &&
-                       stat(command, &statbuf) != 0) {
+                while (path_list[curr_path] != NULL && stat(command, &statbuf) != 0) {
                     free(command);
                     commlen = strlen(path_list[curr_path]) +
                               strlen(list->tokens[0]) + 2;
