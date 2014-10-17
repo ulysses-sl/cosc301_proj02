@@ -8,4 +8,11 @@ struct node {
     struct node *next;
 };
 
+struct process {
+    char name[20];
+    int pid;
+    bool state;
+    struct process *next;
+};
+
 #endif // __LIST_H__

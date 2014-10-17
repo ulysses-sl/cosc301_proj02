@@ -20,7 +20,11 @@ void append_tokens(struct node **list, char **tokens);
 void free_tokens(char **tokens);
 void free_list(struct node **list);
 bool pop_list(struct node **list);
+void add_process(struct process **plist, int pid, char *command);
+bool clear_finished_process(struct process **plist);
 bool mode_set(char **tokens, bool current_mode);
+void exit_message(int pid, char *command);
+void process_running(int pid, bool state, struct process *plist);
 
 
 /* return tokens of parsed paths */
@@ -119,13 +123,6 @@ void error_print_tokens(char **tokens) {
 void append_tokens(struct node **list, char **tokens) {
     // ignore empty token
     if (tokens[0] == NULL) { free(tokens); return; }
-/*
-    int i = 0;
-    while (tokens[i] != NULL) {
-        printf("%s ", tokens[i++]);
-    }
-    printf("\n");
-*/
     struct node *newnode = malloc(sizeof(struct node));
     newnode->next = NULL;
     newnode->tokens = tokens;
@@ -165,6 +162,68 @@ bool pop_list(struct node **list) {
 }
 
 
+/* add new process to the list */
+void add_process(struct process **plist, int pid, char *command) {
+    struct process *newp = malloc(sizeof(struct process));
+    strncpy(newp->name, command, 20);
+    newp->pid = pid;
+    newp->state = true;
+    newp->next = NULL;
+    if (plist != NULL) { newp->next = *plist; }
+    *plist = newp;
+}
+
+
+/* if there is any finished process, remove and return true */
+bool clear_finished_process(struct process **plist) {
+    int status;
+    if (*plist == NULL) { return false; }
+
+    if (waitpid((*plist)->pid, &status, WNOHANG) != 0) {
+        exit_message((*plist)->pid, (*plist)->name);
+        struct process *temp = *plist;
+        *plist = (*plist)->next;
+        free(temp);
+        return true;
+    }
+    struct process *curr = *plist;
+    while (curr->next != NULL) {
+        if (waitpid(curr->next->pid, &status, WNOHANG) != 0) {
+            exit_message(curr->next->pid, curr->next->name);
+            struct process *temp = curr->next;
+            curr->next = curr->next->next;
+            free(temp);
+            return true;
+        }
+        curr = curr->next;
+    }
+    return false;
+}
+
+
+void exit_message(int pid, char *command) {
+    printf("\nProcess %d (%s) has finished.\n", pid, command);
+}
+
+
+void jobprint(struct process *plist) {
+    if (plist == NULL) {
+        printf("No job running in the background\n");
+        return;
+    }
+    while (plist != NULL) {
+        if (plist->state) {
+            printf("Process %d (%s) is running.\n", plist->pid, plist->name);
+        }
+        else {
+            printf("Process %d (%s) is paused.\n", plist->pid, plist->name);
+        }
+        plist = plist->next;
+    }
+}
+
+
+/* set and display mode */
 bool mode_set(char **tokens, bool current_mode) {
     if (tokens[1] == NULL) {
         if (current_mode) {
@@ -176,7 +235,7 @@ bool mode_set(char **tokens, bool current_mode) {
         return current_mode;
     }
     else if (tokens[2] != NULL) {
-        printf("** Unrecognized mode argument **\n");
+        fprintf(stderr, "** Unrecognized mode argument **\n");
         return current_mode;
     }
     else if (strcmp(tokens[1], "sequential") == 0 ||
@@ -188,9 +247,22 @@ bool mode_set(char **tokens, bool current_mode) {
         return true;
     }
     else {
-        printf("** Unrecognized mode argument **\n");
+        fprintf(stderr, "** Unrecognized mode argument **\n");
         return current_mode;
     }
+}
+
+
+/* update process state */
+void process_running(int pid, bool state, struct process *plist) {
+    while (plist != NULL) {
+        if (plist->pid == pid) {
+            plist->state = state;
+            return;
+        }
+        plist = plist->next;
+    }
+    fprintf(stderr, "No process with the pid running\n");
 }
 
 
@@ -210,24 +282,46 @@ int main(int argc, char **argv) {
     bool parallel_mode = false;
     bool exit_flag = false;
     bool next_parallel_mode = false;
+    bool new_cursor = true;
     int status = 0;
     pid_t pid = 0;
     struct node *list = NULL;
+    struct process *process_list = NULL;
 
     while (1) {
+        struct pollfd pfd[1];
+        pfd[0].fd = 0;
+        pfd[0].events = POLLIN;
+        pfd[0].revents = 0;
+
         // input buffer
         char *input = malloc(1024 * sizeof(char));
         strcpy(input, "");
 
-        printf("lleh$ ");
-        if (fgets(input, 1024, stdin) != NULL) {
-            int len = strlen(input);
-            input[len - 1] = '\0';
-            commandify(input, &list);
+        if (new_cursor) {
+            printf("lleh$ ");
+            fflush(stdout);
+            new_cursor = false;
+        }
+
+        int rv = poll(&pfd[0], 1, 1000);
+
+        if (rv > 0) {
+            if (fgets(input, 1024, stdin) != NULL) {
+                int len = strlen(input);
+                input[len - 1] = '\0';
+                commandify(input, &list);
+                new_cursor = true;
+            }
+            else {
+                exit_flag = true;
+                list = NULL;
+            }
         }
         else {
-            exit_flag = true;
+            list = NULL;
         }
+
 
         free(input);
 
@@ -240,62 +334,124 @@ int main(int argc, char **argv) {
                 next_parallel_mode = mode_set(list->tokens, parallel_mode);
                 pop_list(&list);
             }
-            /*else if (strcmp(list->tokens[0], "jobs") == 0) {
+            else if (strcmp(list->tokens[0], "jobs") == 0) {
+                jobprint(process_list);
+                pop_list(&list);
             }
             else if (strcmp(list->tokens[0], "pause") == 0) {
+                if (list->tokens[1] == NULL ||
+                    list->tokens[2] != NULL) {
+                    fprintf(stderr, "Unrecognized pause argument");
+                }
+                else {
+                    int pid = strtol(list->tokens[1], NULL, 10);
+                    if (pid == 0) {
+                        fprintf(stderr, "Unrecognized pause argument");
+                    }
+                    else {
+                        kill(pid, SIGSTOP);
+                        process_running(pid, false, process_list);
+                    }
+                }
+                pop_list(&list);
             }
             else if (strcmp(list->tokens[0], "resume") == 0) {
-            }*/
+                if (list->tokens[1] == NULL ||
+                    list->tokens[2] != NULL) {
+                    fprintf(stderr, "Unrecognized pause argument");
+                }
+                else {
+                    int pid = strtol(list->tokens[1], NULL, 10);
+                    if (pid == 0) {
+                        fprintf(stderr, "Unrecognized pause argument");
+                    }
+                    else {
+                        kill(pid, SIGCONT);
+                        process_running(pid, true, process_list);
+                    }
+                }
+                pop_list(&list);
+            }
             else {
                 // we actually get to execute something
+                int commlen = strlen(list->tokens[0]) + 1;
+                char *command = malloc(commlen * sizeof(char));
+                strcpy(command, list->tokens[0]);
+                int curr_path = 0;
+
+                bool it_runs = false;
+
+                // match the path-file pair puzzle
+                while (path_list != NULL &&
+                       path_list[curr_path] != NULL &&
+                       stat(command, &statbuf) != 0) {
+                    free(command);
+                    commlen = strlen(path_list[curr_path]) +
+                              strlen(list->tokens[0]) + 2;
+                    command = malloc(commlen);
+                    strcpy(command, path_list[curr_path++]);
+                    strcat(command, "/");
+                    strcat(command, list->tokens[0]);
+                }
+
+                // if command exists, swap.
+                if (stat(command, &statbuf) == 0) {
+                    free(list->tokens[0]);
+                    list->tokens[0] = command;
+                    it_runs = true;
+                }
+                else { free(command); }
+
+                // ...and fork, finally
                 pid = fork();
                 if (pid == 0) {
-                    int commlen = strlen(list->tokens[0]) + 1;
-                    char *command = malloc(commlen * sizeof(char));
-                    strcpy(command, list->tokens[0]);
-                    int curr_path = 0;
-
-                    // match the path-file pair puzzle
-                    while (path_list != NULL &&
-                           path_list[curr_path] != NULL &&
-                           stat(command, &statbuf) != 0) {
-                        free(command);
-                        commlen = strlen(path_list[curr_path]) +
-                                  strlen(list->tokens[0]) + 2;
-                        command = malloc(commlen);
-                        strcpy(command, path_list[curr_path++]);
-                        strcat(command, "/");
-                        strcat(command, list->tokens[0]);
-                    }
-
-                    // if command exists, swap.
-                    if (stat(command, &statbuf) == 0) {
-                        free(list->tokens[0]);
-                        list->tokens[0] = command;
-                    }
-                    else { free(command); }
 
                     if (execv(list->tokens[0], list->tokens) < 0) {
                         error_print_tokens(list->tokens);
                         free_tokens(path_list);
                         free_list(&list);
+                        while (process_list != NULL) {
+                            struct process *ptemp = process_list;
+                            process_list = process_list->next;
+                            free(ptemp);
+                        }
                         exit(0);
                     }
                 }
                 else if (!parallel_mode) {
                     wait(&status);
                 }
+                else if (it_runs) {
+                    add_process(&process_list, pid, list->tokens[0]);
+                    it_runs = false;
+                }
                 pop_list(&list);
             }
         }
-        while (wait(&status) != -1);
+        if(clear_finished_process(&process_list)) {
+            new_cursor = true;
+        }
 
         if (exit_flag) {
-            free_tokens(path_list);
-            exit(0);
+            if (process_list == NULL) {
+                free_tokens(path_list);
+                exit(0);
+            }
+            else {
+                fprintf(stderr, "\nCannot terminate: background processes running\n");
+                exit_flag = false;
+                new_cursor = true;
+            }
         }
     
-        parallel_mode = next_parallel_mode;
+        if (parallel_mode != next_parallel_mode && process_list != NULL) {
+            fprintf(stderr, "Cannot change mode: background processes running\n");
+            next_parallel_mode = parallel_mode;
+            new_cursor = true;
+        }
+        else {
+            parallel_mode = next_parallel_mode;
+        }
     }
 
     return 0;
