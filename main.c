@@ -137,6 +137,7 @@ void append_tokens(struct node **list, char **tokens) {
 
 /* free the array of tokens */
 void free_tokens(char **tokens) {
+    if (tokens == NULL) { return; }
     int i = 0;
     while (tokens[i] != NULL) { free(tokens[i++]); }
     free(tokens);
@@ -434,6 +435,7 @@ int main(int argc, char **argv) {
 
         if (exit_flag) {
             if (process_list == NULL) {
+                printf("\n");
                 free_tokens(path_list);
                 exit(0);
             }
