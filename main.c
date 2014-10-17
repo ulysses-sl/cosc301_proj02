@@ -404,6 +404,7 @@ int main(int argc, char **argv) {
                 else {
                     free(command);
                     new_cursor = true;
+                    error_print_tokens(list->tokens);
                 }
 
                 // ...and fork, finally
@@ -411,7 +412,6 @@ int main(int argc, char **argv) {
                 if (pid == 0) {
 
                     if (execv(list->tokens[0], list->tokens) < 0) {
-                        error_print_tokens(list->tokens);
                         free_tokens(path_list);
                         free_list(&list);
                         while (process_list != NULL) {
