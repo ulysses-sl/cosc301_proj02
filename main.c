@@ -434,6 +434,7 @@ int main(int argc, char **argv) {
         }
         if(clear_finished_process(&process_list)) {
             new_cursor = true;
+            while(clear_finished_process(&process_list));
         }
 
         if (exit_flag) {
